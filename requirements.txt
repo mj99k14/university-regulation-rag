@@ -1,0 +1,32 @@
+# ── PDF 파싱 ─────────────────────────────────────────────────────────────────
+pdfplumber
+
+# ── PostgreSQL + pgvector ────────────────────────────────────────────────────
+psycopg2-binary
+pgvector
+sqlalchemy
+
+# ── LangChain / LangGraph ────────────────────────────────────────────────────
+langchain
+langchain-core
+langchain-community
+langchain-postgres          # pgvector ↔ LangChain VectorStore 연동
+langgraph                   # Agentic RAG 상태 머신
+
+# ── LLM ─────────────────────────────────────────────────────────────────────
+langchain-anthropic          # Claude (LangGraph 에이전트용)
+anthropic                    # MCP 서버에서 직접 Claude 호출 시
+
+# ── 임베딩 (하나만 활성화) ──────────────────────────────────────────────────
+langchain-openai             # OpenAI text-embedding-3-small (추천: 한국어 성능 검증됨)
+# sentence-transformers      # 로컬 한국어 모델 (jhgan/ko-sroberta-multitask)
+# langchain-huggingface      # sentence-transformers를 LangChain과 연결할 때 같이 설치
+
+# ── 하이브리드 검색 (Dense + BM25 앙상블) ───────────────────────────────────
+rank-bm25
+
+# ── MCP 서버 ────────────────────────────────────────────────────────────────
+mcp[cli]
+
+# ── 유틸리티 ────────────────────────────────────────────────────────────────
+python-dotenv
