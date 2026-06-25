@@ -74,31 +74,39 @@ def _load_all_docs() -> tuple[list[Document], list[Document]]:
 
 def get_hybrid_retriever(k: int = 5) -> EnsembleRetriever:
     """
-    Dense + BM25 앙상블 리트리버 반환.
+    Dense(child) + Dense(parent) + BM25 앙상블 리트리버 반환.
 
     k : 각 리트리버가 가져오는 청크 수 (앙상블 후 중복 제거됨)
+
+    Dense를 child/parent 두 갈래로 나누는 이유:
+      제21조(제적)처럼 항(①) 마커 없이 호(1.2.3.) 형식만 있는 조항은
+      child 청크가 생성되지 않아 child-only Dense에선 절대 잡히지 않음.
+      parent Dense를 따로 두어 이런 조항을 보완함.
     """
     embeddings = _get_embeddings()
+    store = _get_vector_store(embeddings)
 
-    # ── Dense (pgvector) ─────────────────────────────────────────────────────
-    # child 청크만 검색해 정밀도를 높임
-    dense_retriever = _get_vector_store(embeddings).as_retriever(
-        search_kwargs={
-            "k": k,
-            "filter": {"chunk_type": "child"},
-        }
+    # ── Dense (child) ─────────────────────────────────────────────────────────
+    # 항 단위 정밀 검색
+    dense_child = store.as_retriever(
+        search_kwargs={"k": k, "filter": {"chunk_type": "child"}},
     )
 
-    # ── Sparse (BM25) ────────────────────────────────────────────────────────
-    # BM25는 전체 청크 대상 (parent도 포함해 법령 용어 커버리지 확보)
+    # ── Dense (parent) ────────────────────────────────────────────────────────
+    # 항 마커 없이 호(1.2.3.)만 있는 조항(제21조 등) 보완
+    dense_parent = store.as_retriever(
+        search_kwargs={"k": k, "filter": {"chunk_type": "parent"}},
+    )
+
+    # ── Sparse (BM25) ─────────────────────────────────────────────────────────
     all_docs, _ = _load_all_docs()
     bm25_retriever = BM25Retriever.from_documents(all_docs)
     bm25_retriever.k = k
 
     # ── 앙상블 ───────────────────────────────────────────────────────────────
     return EnsembleRetriever(
-        retrievers=[dense_retriever, bm25_retriever],
-        weights=[0.6, 0.4],
+        retrievers=[dense_child, dense_parent, bm25_retriever],
+        weights=[0.4, 0.3, 0.3],
     )
 
 

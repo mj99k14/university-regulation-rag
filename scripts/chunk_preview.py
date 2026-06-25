@@ -42,6 +42,8 @@ REVISION_TAG_PAT = re.compile(r"<(?:개정|신설|삭제)[^>]*>")
 FOOTNOTE_PAT = re.compile(r"\[(?:전문개정|조신설|본조신설|제목개정|조문이동|항신설|항삭제|호신설|호삭제|신설|개정)[^\]]*\]")
 # 날짜 추출: yyyy.mm.dd. 형식
 DATE_PAT = re.compile(r"\d{4}\.\d{1,2}\.\d{1,2}\.")
+# 호(號) 형식: "1. 내용", "2. 내용"
+HO_LINE_PAT = re.compile(r"^(\d+)\.\s+(.+)")
 
 
 def circled_to_num(c: str) -> int:
@@ -277,10 +279,13 @@ def parse_bonchik(lines):
             "metadata": {**base_meta, "항_번호": None, "항_순서": None},
         })
 
-        # Child chunks
+        # Child chunks — 항(①②③) 단위
         for h_no, h_raw in hang_list:
             h_latest = extract_latest_revision(h_raw)
             h_text = clean_text(h_raw)
+            # 삭제된 항("삭제 <날짜>" 형식) 제외
+            if h_text.strip().startswith("삭제"):
+                continue
             chunks.append({
                 "chunk_id": f"{jo_id}-항{h_no}",
                 "parent_id": jo_id,
@@ -293,6 +298,45 @@ def parse_bonchik(lines):
                     "조항_최종개정일": h_latest or latest_rev,
                 },
             })
+
+        # Child chunks — 항이 없고 호(1.2.3.) 형식만 있는 경우
+        # 예: 제21조(제적), 제29조(성적의 취소), 제38조(학생활동의 사전승인)
+        if not hang_list:
+            ho_list = []
+            cur_ho_no = None
+            cur_ho_lines = []
+            for line in parent_text.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                m = HO_LINE_PAT.match(line)
+                if m:
+                    if cur_ho_no is not None:
+                        ho_list.append((cur_ho_no, "\n".join(cur_ho_lines)))
+                    cur_ho_no = int(m.group(1))
+                    cur_ho_lines = [line]
+                elif cur_ho_no is not None:
+                    cur_ho_lines.append(line)
+            if cur_ho_no is not None and cur_ho_lines:
+                ho_list.append((cur_ho_no, "\n".join(cur_ho_lines)))
+
+            for h_no, h_text in ho_list:
+                # 삭제된 호("N. 삭제 <날짜>" 형식) 제외
+                if re.search(r"삭제", h_text):
+                    continue
+                chunks.append({
+                    "chunk_id": f"{jo_id}-호{h_no}",
+                    "parent_id": jo_id,
+                    "chunk_type": "child",
+                    "text": h_text,
+                    "metadata": {
+                        **base_meta,
+                        "항_번호": None,
+                        "항_순서": None,
+                        "호_번호": f"제{h_no}호",
+                        "호_순서": h_no,
+                    },
+                })
 
         jo_id = None
         jo_raw_lines.clear()

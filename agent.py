@@ -47,7 +47,7 @@ llm_generate = ChatAnthropic(
     anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
 )
 
-retriever = get_hybrid_retriever(k=5)
+retriever = get_hybrid_retriever(k=8)
 
 
 # ── 노드 함수 ─────────────────────────────────────────────────────────────────
@@ -88,7 +88,8 @@ def generate(state: AgentState) -> dict:
     """검색된 조항을 근거로 Claude Sonnet이 최종 답변 생성."""
     context = "\n\n".join(
         f"[{d.metadata.get('조_번호', d.metadata.get('별표_번호', ''))} "
-        f"{d.metadata.get('조_제목', d.metadata.get('별표_제목', ''))}]\n{d.page_content}"
+        f"{d.metadata.get('조_제목', d.metadata.get('별표_제목', ''))} "
+        f"(p.{d.metadata.get('페이지', '?')})]\n{d.page_content}"
         for d in state["documents"]
     )
     if not context:
