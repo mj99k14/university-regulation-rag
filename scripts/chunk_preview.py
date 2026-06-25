@@ -443,8 +443,79 @@ def extract_byeolpyo(pdf_path: str):
         "metadata": {**base_meta, "별표_번호": "별표2", "별표_제목": "모집단위별 입학정원 및 수업연한"},
     })
 
-    # 별표2: 2025·2026 두 컬럼이 한 줄에 나란히 있어 행 단위 파싱이 불안정.
-    # parent 청크만 두고, LLM이 전체 텍스트에서 직접 학과·정원 정보를 읽도록 함.
+    # ── 별표2 child 청크: pdfplumber 테이블 추출로 학과별 정원 파싱 ─────────
+    SKIP_ROW_PAT = re.compile(r"합계|계열/학과|수업|입학|힉년도")
+    b2_meta = {**base_meta, "별표_번호": "별표2", "별표_제목": "모집단위별 입학정원 및 수업연한"}
+    child_idx = 0
+    campus = None
+
+    with pdfplumber.open(pdf_path) as pdf2:
+        for page_i in range(35, len(pdf2.pages)):
+            raw = pdf2.pages[page_i].extract_text() or ""
+            if not re.search(r"별표 2\]", raw):
+                continue
+            tables = pdf2.pages[page_i].find_tables()
+            if not tables:
+                break
+            rows = tables[0].extract()
+            for row_i, row in enumerate(rows):
+                if row_i < 2:  # 헤더 2행 스킵
+                    continue
+                # 캠퍼스 추적
+                c = (row[0] or "").replace("\n", "").strip()
+                if c and "합계" not in c:
+                    campus = c
+
+                # 학과/계열명: 2025는 col1(+col2), 2026은 col7(+col8)
+                n25 = " ".join(filter(None, [
+                    (row[1] or "").replace("\n", " ").strip(),
+                    (row[2] or "").replace("\n", " ").strip(),
+                ])).strip()
+                n26 = " ".join(filter(None, [
+                    (row[7] or "").replace("\n", " ").strip(),
+                    (row[8] or "").replace("\n", " ").strip(),
+                ])).strip()
+
+                name = n25 if (n25 and n25 != "-") else n26
+                if not name or name == "-" or SKIP_ROW_PAT.search(name):
+                    continue
+
+                정원25 = (row[6] or "").strip()
+                정원26 = (row[13] or "").strip()
+                수업연한 = (row[5] or row[12] or "").strip()
+
+                전공25 = (row[3] or "").replace("\n", ", ").strip()
+                전공26 = (row[9] or "").replace("\n", ", ").strip()
+                전공 = 전공25 or 전공26
+
+                parts = [f"{name}"]
+                if campus:
+                    parts[0] = f"[{campus}] {name}"
+                if 전공:
+                    parts.append(f"세부전공: {전공}")
+                if 수업연한:
+                    parts.append(f"수업연한 {수업연한}년")
+                if 정원25:
+                    parts.append(f"2025년 입학정원 {정원25}명")
+                if 정원26:
+                    parts.append(f"2026년 입학정원 {정원26}명")
+
+                child_idx += 1
+                chunks.append({
+                    "chunk_id": f"별표2-{child_idx}",
+                    "parent_id": "별표2",
+                    "chunk_type": "child",
+                    "text": " / ".join(parts),
+                    "metadata": {
+                        **b2_meta,
+                        "캠퍼스": campus,
+                        "학과명": name,
+                        "입학정원_2025": 정원25,
+                        "입학정원_2026": 정원26,
+                        "수업연한": 수업연한,
+                    },
+                })
+            break
 
     return chunks
 
