@@ -17,7 +17,7 @@ from langchain_core.documents import Document
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 sys.path.insert(0, os.path.dirname(__file__))
-from scripts.chunk_preview import extract_lines, parse_bonchik, extract_byeolpyo
+from scripts.chunk_preview import extract_lines, parse_bonchik, parse_buchik, extract_byeolpyo
 
 load_dotenv()
 
@@ -33,7 +33,7 @@ CONNECTION_STRING = (
 def build_documents() -> list[Document]:
     """PDF를 파싱해 LangChain Document 리스트로 변환."""
     lines = extract_lines(PDF_PATH)
-    chunks = parse_bonchik(lines) + extract_byeolpyo(PDF_PATH)
+    chunks = parse_bonchik(lines) + parse_buchik(lines) + extract_byeolpyo(PDF_PATH)
 
     docs = []
     for c in chunks:
