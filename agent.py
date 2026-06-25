@@ -17,7 +17,7 @@ from langchain_core.documents import Document
 from langchain_anthropic import ChatAnthropic
 from langgraph.graph import StateGraph, END
 
-from retriever import get_hybrid_retriever
+from retriever import get_hybrid_retriever, fetch_parent
 from prompts import grade_prompt, rewrite_prompt, generate_prompt
 
 load_dotenv()
@@ -54,10 +54,20 @@ retriever = get_hybrid_retriever(k=8)
 # ── 노드 함수 ─────────────────────────────────────────────────────────────────
 
 def retrieve(state: AgentState) -> dict:
-    """pgvector + BM25 하이브리드 검색."""
+    """pgvector + BM25 하이브리드 검색. child 청크는 parent도 함께 추가."""
     q = state.get("rewrite_query") or state["query"]
     docs = retriever.invoke(q)
-    return {"documents": docs}
+
+    seen_ids = {d.metadata.get("chunk_id") for d in docs}
+    extra = []
+    for doc in docs:
+        if doc.metadata.get("chunk_type") == "child":
+            parent = fetch_parent(doc)
+            if parent and parent.metadata.get("chunk_id") not in seen_ids:
+                extra.append(parent)
+                seen_ids.add(parent.metadata.get("chunk_id"))
+
+    return {"documents": docs + extra}
 
 # 관련성 평가 하는 함수
 def grade(state: AgentState) -> dict:
