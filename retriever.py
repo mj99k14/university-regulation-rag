@@ -49,10 +49,10 @@ def _get_vector_store(embeddings: OpenAIEmbeddings | None = None) -> PGVector:
 def _load_all_docs() -> tuple[list[Document], list[Document]]:
     """PDF 재파싱해서 (전체 문서, child만) 반환."""
     sys.path.insert(0, os.path.dirname(__file__))
-    from scripts.chunk_preview import extract_lines, parse_bonchik, extract_byeolpyo
+    from scripts.chunk_preview import extract_lines, parse_bonchik, parse_buchik, extract_byeolpyo
 
     lines = extract_lines(PDF_PATH)
-    chunks = parse_bonchik(lines) + extract_byeolpyo(PDF_PATH)
+    chunks = parse_bonchik(lines) + parse_buchik(lines) + extract_byeolpyo(PDF_PATH)
 
     all_docs, child_docs = [], []
     for c in chunks:
