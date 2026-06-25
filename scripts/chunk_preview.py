@@ -28,7 +28,7 @@ OUTPUT_PATH = "chunks_preview.json"
 # ─── 정규식 ────────────────────────────────────────────────────────────────
 CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 
-HEADER_PAT  = re.compile(r"영진전문대학교 규정집 \[.*?\]")
+HEADER_PAT  = re.compile(r"영진전문대학교 규정집\s+\[.*?\]")
 DOC_HDR_PAT = re.compile(r"^(영진전문대학교 학칙|제정|개정|소관부서)")
 JANG_PAT    = re.compile(r"^제(\d+)장\s+(.+)$")
 JO_PAT      = re.compile(r"^(제(\d+)조(?:의(\d+))?)\((.+?)\)\s*(.*)")
@@ -73,17 +73,112 @@ def clean_text(text: str) -> str:
 
 # ─── PDF 추출 ───────────────────────────────────────────────────────────────
 
+def _table_to_rows(table_data: list) -> list:
+    """pdfplumber 테이블 2D 배열 → 구조화된 텍스트 줄 목록.
+
+    병합 셀(None/빈 값)은 바로 위 행의 값을 이어받아 채운다.
+    예) 졸업학점 표 →
+        "구분 정규과정 2년제 / 졸업학점 기준 74학점"
+        "구분 정규과정 3년제 / 졸업학점 기준 110학점"
+        ...
+    """
+    if not table_data or len(table_data) < 2:
+        return []
+
+    headers = [str(h or "").strip() for h in table_data[0]]
+    rows_out = []
+    prev_vals = [""] * len(headers)
+
+    for row in table_data[1:]:
+        vals = []
+        for i, cell in enumerate(row):
+            v = str(cell or "").strip().replace("\n", " ")
+            if not v and i < len(prev_vals):
+                v = prev_vals[i]          # 병합 셀 → 위 행 값 사용
+            vals.append(v)
+        prev_vals = vals[:]
+
+        pairs = [(h, v) for h, v in zip(headers, vals)
+                 if v and v not in ("-", "–", "—")]
+        if pairs:
+            parts = [f"{h} {v}".strip() if h else v for h, v in pairs]
+            rows_out.append(" / ".join(parts))
+
+    return rows_out
+
+
 def extract_lines(pdf_path: str):
-    """줄 목록과 페이지 번호 반환. 반복 헤더 제거."""
+    """줄 목록과 페이지 번호 반환. 반복 헤더 제거.
+
+    표가 있는 페이지는 글자 y좌표 기반으로 텍스트·표 행을 올바른 순서로 결합한다.
+    - 표 영역 글자는 char 레벨에서 제외 → 깨진 텍스트 방지
+    - 표 행은 _table_to_rows()로 구조화한 뒤 bbox y좌표 위치에 삽입
+    """
     result = []
     with pdfplumber.open(pdf_path) as pdf:
         for page_i, page in enumerate(pdf.pages):
-            raw = page.extract_text() or ""
-            raw = HEADER_PAT.sub("", raw)
-            for line in raw.splitlines():
-                line = line.strip()
-                if line:
-                    result.append((line, page_i + 1))
+            page_num = page_i + 1
+            found_tables = page.find_tables()
+
+            if not found_tables:
+                raw = page.extract_text() or ""
+                raw = HEADER_PAT.sub("", raw)
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if line:
+                        result.append((line, page_num))
+                continue
+
+            # ── 표가 있는 페이지 ────────────────────────────────────────────
+            table_bboxes = [t.bbox for t in found_tables]
+
+            # 표 밖 글자를 y·x 순으로 수집
+            non_table_chars = sorted(
+                (c for c in page.chars
+                 if not any(
+                     x0 - 2 <= c["x0"] and c["x1"] <= x1 + 2
+                     and top - 2 <= c["top"] and c["bottom"] <= bottom + 2
+                     for x0, top, x1, bottom in table_bboxes
+                 )),
+                key=lambda c: (c["top"], c["x0"]),
+            )
+
+            items = []  # [(y, text)]
+
+            # 글자 → 텍스트 줄 (같은 y ±3pt 를 한 줄로 묶음)
+            if non_table_chars:
+                cur_y = non_table_chars[0]["top"]
+                cur_chars = []
+                for c in non_table_chars:
+                    if abs(c["top"] - cur_y) <= 3:
+                        cur_chars.append(c)
+                    else:
+                        t = "".join(ch["text"] for ch in cur_chars).strip()
+                        if t:
+                            items.append((cur_y, t))
+                        cur_y = c["top"]
+                        cur_chars = [c]
+                if cur_chars:
+                    t = "".join(ch["text"] for ch in cur_chars).strip()
+                    if t:
+                        items.append((cur_y, t))
+
+            # 표 행을 bbox y 위치에 균등 배분
+            for tbl in found_tables:
+                rows = _table_to_rows(tbl.extract())
+                if not rows:
+                    continue
+                t_top, t_bot = tbl.bbox[1], tbl.bbox[3]
+                row_h = (t_bot - t_top) / len(rows)
+                for i, row_text in enumerate(rows):
+                    items.append((t_top + i * row_h, row_text))
+
+            # y 순 정렬 후 result 에 추가
+            for _, text in sorted(items, key=lambda x: x[0]):
+                text = HEADER_PAT.sub("", text).strip()
+                if text:
+                    result.append((text, page_num))
+
     return result
 
 

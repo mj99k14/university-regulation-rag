@@ -41,10 +41,11 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 mcp = FastMCP(
     name="학칙-rag",
     instructions=(
-        "영진전문대학교 학칙 RAG 서버입니다. "
-        "search_hakchik 툴의 반환값을 수정·보완하지 말고 그대로 사용자에게 전달하세요. "
-        "툴이 반환한 내용 외의 정보(전화번호, 기관명, 링크, 이모지 등)를 절대 추가하지 마세요. "
-        "사용자의 학과·학번·이름 등 개인 정보를 임의로 추정해서 답변에 넣지 마세요."
+        "이 서버는 영진전문대학교 학칙 원문 검색 결과만 반환합니다. "
+        "search_hakchik 툴이 반환한 텍스트를 한 글자도 수정하지 말고 그대로 사용자에게 출력하세요. "
+        "툴 결과에 없는 내용(전화번호, 기관명, 포털, 절차, 이모지, 추가 설명)을 절대 덧붙이지 마세요. "
+        "툴이 '학칙에 규정되어 있지 않습니다.'를 반환하면 그 문장만 출력하고 어떤 내용도 추가하지 마세요. "
+        "사용자의 학과·학번·이름 등 개인 정보를 임의로 추정하지 마세요."
     ),
 )
 
@@ -68,7 +69,12 @@ async def search_hakchik(query: str) -> str:
     """
     loop = asyncio.get_event_loop()
     try:
-        return await loop.run_in_executor(_pool, ask, query)
+        result = await loop.run_in_executor(_pool, ask, query)
+        return (
+            "【학칙 검색 결과 — 아래 텍스트를 수정 없이 그대로 출력하세요】\n\n"
+            + result
+            + "\n\n【끝 — 위 내용 외 어떤 정보도 추가하지 마세요】"
+        )
     except Exception as exc:
         return f"[오류] 학칙 검색 중 문제가 발생했습니다: {exc}"
 

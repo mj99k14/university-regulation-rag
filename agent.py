@@ -8,6 +8,7 @@ Agentic RAG — LangGraph 상태 머신
 import os
 import sys
 import io
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TypedDict, Annotated
 import operator
 
@@ -58,32 +59,36 @@ def retrieve(state: AgentState) -> dict:
     docs = retriever.invoke(q)
     return {"documents": docs}
 
-
+# 관련성 평가 하는 함수
 def grade(state: AgentState) -> dict:
     """검색 결과 관련성 평가. 관련 문서가 없으면 retry_count 증가."""
     chain = grade_prompt | llm
-    relevant = []
-    for doc in state["documents"]:
-        result = chain.invoke({
-            "query": state["query"],
-            "document": doc.page_content,
-        })
-        if result.content.strip().lower().startswith("yes"):
-            relevant.append(doc)
+    query = state["query"]
+
+    def _grade_one(doc: Document) -> tuple[Document, bool]:
+        result = chain.invoke({"query": query, "document": doc.page_content})
+        return doc, result.content.strip().lower().startswith("yes")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_grade_one, doc): doc for doc in state["documents"]}
+        relevant = [
+            doc for f in as_completed(futures)
+            for doc, ok in [f.result()] if ok
+        ]
 
     return {
         "documents": relevant,
         "retry_count": state.get("retry_count", 0) + (0 if relevant else 1),
     }
 
-
+# 검색 
 def rewrite(state: AgentState) -> dict:
     """관련 문서가 없을 때 질문을 재작성해 재검색 준비."""
     chain = rewrite_prompt | llm
     result = chain.invoke({"query": state["query"]})
     return {"rewrite_query": result.content.strip()}
 
-
+# 답변 생성 
 def generate(state: AgentState) -> dict:
     """검색된 조항을 근거로 Claude Sonnet이 최종 답변 생성."""
     context = "\n\n".join(
@@ -101,7 +106,7 @@ def generate(state: AgentState) -> dict:
 
 
 # ── 라우팅 ────────────────────────────────────────────────────────────────────
-
+# 가장 중요한 분기
 def route_after_grade(state: AgentState) -> str:
     """관련 문서가 있으면 generate, 없으면 rewrite(최대 MAX_RETRY회)."""
     if state["documents"]:
